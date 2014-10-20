@@ -117,6 +117,8 @@ pm.request = {
             // CodeMirror does not work well with pure JSON format.
             if (mode === 'javascript') {
 
+              //TODO: Never got this block to work with worker, probably doesn't enter here
+
               // Validate code first.
               try {
                 validated = pm.jsonlint.instance.parse(content);
@@ -130,6 +132,9 @@ pm.request = {
                 // We could also highlight the line with error here.
                 $('#body-editor-mode-selector-format-result').html(result).show();
               }
+
+              
+
             } else { // Otherwise use internal CodeMirror.autoFormatRage method for a specific mode.
               var totalLines = pm.request.body.codeMirror.lineCount(),
                   totalChars = pm.request.body.codeMirror.getValue().length;
@@ -1165,9 +1170,82 @@ pm.request = {
                 try {
                     if ('string' ===  typeof response && response.match(/^[\)\]\}]/))
                         response = response.substring(response.indexOf('\n'));
-                    response = vkbeautify.json(response);
-                    mode = 'javascript';
-                    foldFunc = CodeMirror.newFoldFunction(CodeMirror.braceRangeFinder);
+
+                    var jsonWorker = new Worker("js/workers/json_processor_beautify.js");
+
+                    jsonWorker.addEventListener('message', function(event){
+
+                      response = event.data;
+
+                      mode = 'javascript';
+                      foldFunc = CodeMirror.newFoldFunction(CodeMirror.braceRangeFinder);
+                      
+                      //Copy starts here
+                      pm.editor.mode = mode;
+                      var renderMode = mode;
+                      if ($.inArray(mode, ["javascript", "xml", "html"]) >= 0) {
+                        renderMode = "links";
+                      }
+
+                      if (!pm.editor.codeMirror || forceCreate) {
+                        $('#response .CodeMirror').remove();
+                        pm.editor.codeMirror = CodeMirror.fromTextArea(codeDataArea,
+                            {
+                              mode:renderMode,
+                          lineNumbers:true,
+                          fixedGutter:true,
+                          onGutterClick:foldFunc,
+                          theme:'eclipse',
+                          lineWrapping:lineWrapping,
+                          readOnly:true
+                            });
+
+                        var cm = pm.editor.codeMirror;
+                        cm.setValue(response);
+                      }
+                      else {
+                        pm.editor.codeMirror.setOption("onGutterClick", foldFunc);
+                        pm.editor.codeMirror.setOption("mode", renderMode);
+                        pm.editor.codeMirror.setOption("lineWrapping", lineWrapping);
+                        pm.editor.codeMirror.setOption("theme", "eclipse");
+                        pm.editor.codeMirror.setOption("readOnly", false);
+                        pm.editor.codeMirror.setValue(response);
+                        pm.editor.codeMirror.refresh();
+
+                        CodeMirror.commands["goDocStart"](pm.editor.codeMirror);
+                        $(window).scrollTop(0);
+                      }
+
+
+                    //If the format is raw then switch
+                    if (format === "parsed") {
+                      $('#response-as-code').css("display", "block");
+                      $('#response-as-text').css("display", "none");
+                      $('#response-as-preview').css("display", "none");
+                      $('#response-pretty-modifiers').css("display", "block");
+                    }
+                    else if (format === "raw") {
+                      $('#code-data-raw').val(response);
+                      var codeDataWidth = $(document).width() - $('#sidebar').width() - 60;
+                      $('#code-data-raw').css("width", codeDataWidth + "px");
+                      $('#code-data-raw').css("height", "600px");
+                      $('#response-as-code').css("display", "none");
+                      $('#response-as-text').css("display", "block");
+                      $('#response-pretty-modifiers').css("display", "none");
+                    }
+                    else if (format === "preview") {
+                      $('#response-as-code').css("display", "none");
+                      $('#response-as-text').css("display", "none");
+                      $('#response-as-preview').css("display", "block");
+                      $('#response-pretty-modifiers').css("display", "none");
+                    }
+
+                    }, false); //Web worker response handle
+                    //Copy ends here
+                   
+                    //Call the worker
+                    jsonWorker.postMessage(response);
+
                 }
                 catch (e) {
                     mode = 'text';
@@ -1194,65 +1272,6 @@ pm.request = {
                 $('#response-body-line-wrapping').removeClass("active");
                 lineWrapping = false;
             }
-
-            pm.editor.mode = mode;
-            var renderMode = mode;
-            if ($.inArray(mode, ["javascript", "xml", "html"]) >= 0) {
-                renderMode = "links";
-            }
-
-            if (!pm.editor.codeMirror || forceCreate) {
-                $('#response .CodeMirror').remove();
-                pm.editor.codeMirror = CodeMirror.fromTextArea(codeDataArea,
-                {
-                    mode:renderMode,
-                    lineNumbers:true,
-                    fixedGutter:true,
-                    onGutterClick:foldFunc,
-                    theme:'eclipse',
-                    lineWrapping:lineWrapping,
-                    readOnly:true
-                });
-
-                var cm = pm.editor.codeMirror;
-                cm.setValue(response);
-            }
-            else {
-                pm.editor.codeMirror.setOption("onGutterClick", foldFunc);
-                pm.editor.codeMirror.setOption("mode", renderMode);
-                pm.editor.codeMirror.setOption("lineWrapping", lineWrapping);
-                pm.editor.codeMirror.setOption("theme", "eclipse");
-                pm.editor.codeMirror.setOption("readOnly", false);
-                pm.editor.codeMirror.setValue(response);
-                pm.editor.codeMirror.refresh();
-
-                CodeMirror.commands["goDocStart"](pm.editor.codeMirror);
-                $(window).scrollTop(0);
-            }
-
-            //If the format is raw then switch
-            if (format === "parsed") {
-                $('#response-as-code').css("display", "block");
-                $('#response-as-text').css("display", "none");
-                $('#response-as-preview').css("display", "none");
-                $('#response-pretty-modifiers').css("display", "block");
-            }
-            else if (format === "raw") {
-                $('#code-data-raw').val(response);
-                var codeDataWidth = $(document).width() - $('#sidebar').width() - 60;
-                $('#code-data-raw').css("width", codeDataWidth + "px");
-                $('#code-data-raw').css("height", "600px");
-                $('#response-as-code').css("display", "none");
-                $('#response-as-text').css("display", "block");
-                $('#response-pretty-modifiers').css("display", "none");
-            }
-            else if (format === "preview") {
-                $('#response-as-code').css("display", "none");
-                $('#response-as-text').css("display", "none");
-                $('#response-as-preview').css("display", "block");
-                $('#response-pretty-modifiers').css("display", "none");
-            }
-
 
         },
 
